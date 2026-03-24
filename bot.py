@@ -22,6 +22,9 @@ if not CHANNEL_LINK:
 if not WEBHOOK_URL:
     raise ValueError("WEBHOOK_URL is missing")
 
+# -------------------------
+# Database
+# -------------------------
 conn = sqlite3.connect("users.db", check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute("""
@@ -42,6 +45,9 @@ def get_main_menu() -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(keyboard)
 
+# -------------------------
+# Telegram Handlers
+# -------------------------
 async def start(update: Update, context) -> None:
     user = update.effective_user
     if user:
@@ -53,7 +59,6 @@ async def start(update: Update, context) -> None:
         "Use the buttons below or commands:\n"
         "/start - Start the bot\n"
         "/help - Help section\n"
-        "/tools - Show AI tools\n"
         "/channel - Join our channel"
     )
 
@@ -69,23 +74,10 @@ async def help_command(update: Update, context) -> None:
         "Available commands:\n"
         "/start - Start the bot\n"
         "/help - Show help\n"
-        "/tools - Show AI tools\n"
         "/channel - Get channel link\n\n"
         "You can also use the buttons in the main menu."
     )
     await update.message.reply_text(help_text, parse_mode="Markdown")
-
-async def tools_command(update: Update, context) -> None:
-    tools_text = (
-        "🧠 *Top AI Tools*\n\n"
-        "1. ChatGPT - AI assistant\n"
-        "2. Canva AI - Design tools\n"
-        "3. Notion AI - Smart notes and writing\n"
-        "4. Midjourney - AI image generation\n"
-        "5. Runway ML - AI video tools\n\n"
-        "More tools coming soon 🚀"
-    )
-    await update.message.reply_text(tools_text, parse_mode="Markdown")
 
 async def channel_command(update: Update, context) -> None:
     channel_text = f"📢 *Join our channel:*\n{CHANNEL_LINK}"
@@ -101,37 +93,42 @@ async def button_handler(update: Update, context) -> None:
             "Available commands:\n"
             "/start - Start the bot\n"
             "/help - Show help\n"
-            "/tools - Show AI tools\n"
             "/channel - Get channel link\n\n"
             "Use /start anytime to return to the main menu."
         )
         await query.edit_message_text(text=text, parse_mode="Markdown")
 
+# -------------------------
+# Telegram App
+# -------------------------
 telegram_app = Application.builder().token(TOKEN).build()
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CommandHandler("help", help_command))
-telegram_app.add_handler(CommandHandler("tools", tools_command))
 telegram_app.add_handler(CommandHandler("channel", channel_command))
 telegram_app.add_handler(CallbackQueryHandler(button_handler))
 
+# -------------------------
+# Flask App
+# -------------------------
 flask_app = Flask(__name__)
 
 @flask_app.route("/")
 def home():
     return "Bot is running"
 
+@flask_app.route("/set_webhook")
+def set_webhook():
+    async def _set():
+        await telegram_app.bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
+    asyncio.run(_set())
+    return "Webhook set successfully"
+
 @flask_app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
-    update = Update.de_json(request.get_json(force=True), telegram_app.bot)
-    telegram_app.update_queue.put_nowait(update)
+    async def process_update():
+        await telegram_app.initialize()
+        update = Update.de_json(request.get_json(force=True), telegram_app.bot)
+        await telegram_app.process_update(update)
+
+    asyncio.run(process_update())
     return "ok"
-
-async def init_bot():
-    await telegram_app.initialize()
-    await telegram_app.start()
-    await telegram_app.bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
-
-if __name__ == "__main__":
-    asyncio.run(init_bot())
-    port = int(os.getenv("PORT", 10000))
-    flask_app.run(host="0.0.0.0", port=port)
