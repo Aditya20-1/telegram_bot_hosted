@@ -99,6 +99,14 @@ telegram_app.add_handler(CommandHandler("help", help_command))
 telegram_app.add_handler(CommandHandler("channel", channel_command))
 telegram_app.add_handler(CallbackQueryHandler(button_handler))
 
+_initialized = False
+
+async def init_telegram():
+    global _initialized
+    if not _initialized:
+        await telegram_app.initialize()
+        _initialized = True
+
 @app.route("/")
 def home():
     return "Bot is running"
@@ -106,17 +114,19 @@ def home():
 @app.route("/set_webhook")
 def set_webhook():
     async def _set():
+        await init_telegram()
         await telegram_app.bot.set_webhook(url=f"{WEBHOOK_URL}/{BOT_TOKEN}")
     asyncio.run(_set())
     return "Webhook set successfully"
 
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def webhook():
+    data = request.get_json(force=True)
+
     async def process():
-        await telegram_app.initialize()
-        update = Update.de_json(request.get_json(force=True), telegram_app.bot)
+        await init_telegram()
+        update = Update.de_json(data, telegram_app.bot)
         await telegram_app.process_update(update)
-        await telegram_app.shutdown()
 
     asyncio.run(process())
-    return "ok"
+    return "ok", 200
